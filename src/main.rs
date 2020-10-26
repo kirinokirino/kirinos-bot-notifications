@@ -10,6 +10,8 @@ use twitchchat::{
 #[macro_use]
 extern crate log;
 use simple_logger::SimpleLogger;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
 // this is a helper module to reduce code deduplication
 mod include;
@@ -28,6 +30,7 @@ fn main() -> anyhow::Result<()> {
     let channels = channels_to_join()?;
 
     let start = std::time::Instant::now();
+    let _result = Command::new("./queue").spawn();
 
     let mut bot = Bot::default()
         .with_action("!raid", move |_args: Args| {
@@ -38,6 +41,11 @@ fn main() -> anyhow::Result<()> {
         })
         .with_action("!host", |_args: Args| {
             play_notification("/home/kirinokirino/audio/host.ogg");
+        })
+        .with_action("!sr", |args: Args| {
+            let message: Vec<&str> = args.msg.data().split(' ').skip(1).collect();
+            //println!("{:#}", message.join(" "));
+            song_request(message);
         })
         .with_action("!uptime", move |args: Args| {
             let output = format!("its been running for {:.2?}", start.elapsed());
@@ -92,6 +100,7 @@ where
 struct Bot {
     commands: HashMap<String, Box<dyn Action>>,
     chatters: HashSet<String>,
+    vip: HashSet<String>,
 }
 
 impl Bot {
@@ -111,7 +120,10 @@ impl Bot {
 
         self.chatters.insert("kirinokirino".to_string());
         self.chatters.insert("Wizebot".to_string());
-
+        self.vip.insert("kirinokirino".to_string());
+        self.vip.insert("lisadikaprio".to_string());
+        self.vip.insert("wizebot".to_string());
+        self.vip.insert("bacing".to_string());
         for channel in channels {
             warn!("joining: {}", channel);
             if let Err(err) = runner.join(channel).await {
@@ -142,23 +154,21 @@ impl Bot {
                 Status::Message(Commands::Privmsg(pm)) => {
                     // see if its a action and do stuff with it
                     let (cmd, name) = Self::name_message(pm.data(), pm.name());
-                    match name {
-                        "kirinokirino" | "Wizebot" => {
-                            if let Some(cmd) = cmd {
-                                if let Some(action) = self.commands.get_mut(cmd) {
-                                    debug!("dispatching to: {}", cmd.escape_debug());
 
-                                    let args = Args {
-                                        msg: &pm,
-                                        writer: &mut writer,
-                                        quit: quit.clone(),
-                                    };
+                    if self.vip.contains(name) {
+                        if let Some(cmd) = cmd {
+                            if let Some(action) = self.commands.get_mut(cmd) {
+                                debug!("dispatching to: {}", cmd.escape_debug());
 
-                                    action.handle(args);
-                                }
+                                let args = Args {
+                                    msg: &pm,
+                                    writer: &mut writer,
+                                    quit: quit.clone(),
+                                };
+
+                                action.handle(args);
                             }
                         }
-                        _ => (),
                     }
 
                     self.new_chatter(name);
@@ -177,9 +187,8 @@ impl Bot {
     }
 
     fn name_message<'a>(message: &'a str, name: &'a str) -> (Option<&'a str>, &'a str) {
-        if !message.starts_with('!') {
-            error!("{}: {}", name, message);
-        }
+        error!("{}: {}", name, message);
+
         let cmd = message.splitn(2, ' ').next();
         (cmd, name)
     }
@@ -201,6 +210,20 @@ fn play_notification(file: &str) {
         .spawn()
     {
         error!("Can't play notification! ERROR: {}", error);
+    }
+}
+
+fn song_request(links: Vec<&str>) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("queue.txt")
+        .unwrap();
+
+    for link in links {
+        if let Err(e) = writeln!(file, "{}", link) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
     }
 }
 
